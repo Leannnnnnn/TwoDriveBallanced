@@ -1,2 +1,8 @@
 # TwoDriveBallanced
 基于esp32的两轮平衡车
+硬件电路
+模块布局：
+图片: https://uploader.shimo.im/f/oq0a2ven8o64f18b.png!thumbnail?accessToken=eyJhbGciOiJIUzI1NiIsImtpZCI6ImRlZmF1bHQiLCJ0eXAiOiJKV1QifQ.eyJhdWQiOiJhY2Nlc3NfcmVzb3VyY2UiLCJleHAiOjE2NDE0ODU5NTMsImciOiJWTUFQVlF2ek1nQ3JYQnFnIiwiaWF0IjoxNjQxNDg1NjUzLCJ1c2VySWQiOjQ3OTQ2MTMwfQ.cyvEjdBT4wBWFTGVAM6daWcQX1I_YabC_8PZatLHqKE
+软件设计
+速度控制
+角度、速度双闭环
