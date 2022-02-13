@@ -1,6 +1,6 @@
 {
-    "port": "COM9",
+    "port": "COM17",
     "configuration": "PSRAM=disabled,PartitionScheme=default,CPUFreq=240,FlashMode=qio,FlashFreq=80,FlashSize=4M,UploadSpeed=921600,DebugLevel=none",
     "board": "esp32:esp32:esp32",
-    "sketch": "software\\test-esp32-mydummy.ino"
+    "sketch": "software\\test-esp32-bt-cpp.ino"
 }
