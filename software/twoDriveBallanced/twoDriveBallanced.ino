@@ -69,15 +69,15 @@ uint16_t control_flag=0;
 
 /************PID参数****************/
 //角度环
-float ANG_P_DATA = 99.99f; // 比例常数 Proportional Const
-float ANG_I_DATA = 99.99f;  // 积分常数  Integral Const    --动态响应
-float ANG_D_DATA = 3.00f; // 微分常数 Derivative Const    --预测作用，增大阻尼
+float ANG_P_DATA = 999.99f; // 比例常数 Proportional Const
+float ANG_I_DATA = 70.00f;  // 积分常数  Integral Const    --动态响应
+float ANG_D_DATA = 10.00f; // 微分常数 Derivative Const    --预测作用，增大阻尼
 #define TARGET_SPEED  0
 #define LIMIT         800      //积分限幅
 
 //速度环
-float SPD_P_DATA = 100.00f; // 比例常数 Proportional Const
-float SPD_I_DATA = 5.00f;  // 积分常数  Integral Const    --动态响应
+float SPD_P_DATA = 20.00f; // 比例常数 Proportional Const
+float SPD_I_DATA = 2.00f;  // 积分常数  Integral Const    --动态响应
 float SPD_D_DATA = 0.00f; // 微分常数 Derivative Const    --预测作用，增大阻尼
 
 
@@ -140,8 +140,10 @@ float SpdPIDCalc(PIDs *pid,float NextPoint)    //速度闭环PID控制设计--�
     register float iError,InteError,iIncpid;
     iError = (float)pid->SetPoint - NextPoint; //偏差
 
+    /*
     if((iError<0.1f )&&(iError>-0.1f))           //偏差滤波
       iError = 0.0f;
+    */
 
     pid->SumError+=iError;
     InteError=pid->Integral * iError;
@@ -239,8 +241,8 @@ void setup() {
   PID_SPD_ParamInit(&pid_spdR);
   moto_pwm_set(RIGHT,0);
   moto_pwm_set(LEFT,0);
-  PID_SetSpeed(&pid_spdL,8);
-  PID_SetSpeed(&pid_spdR,8);
+  PID_SetSpeed(&pid_spdL,0);
+  PID_SetSpeed(&pid_spdR,0);
 
   /***************** 编码器初始化 *****************/
   pinMode(RCODE, INPUT);    pinMode(LCODE, INPUT);   
@@ -298,11 +300,11 @@ void loop() {
         */
         mpu6050.update();
         getAngle=mpu6050.getAngleX();
-        //setSpeed=SpdPIDCalc(&pid_spdL,getAngle);
+        setSpeed=SpdPIDCalc(&pid_ang,getAngle);
         setSpeedL += SpdPIDCalc(&pid_spdL, (direcL*Lcountbuff));
         //Serial.println(direcL*Lcountbuff);
-        Serial.println(direcR*Rcountbuff);
-        setSpeedR=setSpeed + SpdPIDCalc(&pid_spdR, (direcR*Rcountbuff));
+        //Serial.println(direcR*Rcountbuff);
+        setSpeedR += SpdPIDCalc(&pid_spdR, (direcR*Rcountbuff));
         moto_pwm_set(RIGHT,(int)(setSpeed+setSpeedR));
         moto_pwm_set(LEFT,(int)(setSpeed+setSpeedL));
       }
@@ -355,16 +357,16 @@ void Bluetooth_Event(esp_spp_cb_event_t event, esp_spp_cb_param_t *param)  //蓝
                   default:break;
                 }
 
-            if((i_buff_M>=5)&&((recBuffBT_M[i_buff_M-5]=='P')||(recBuffBT_M[i_buff_M-5]=='I')||(recBuffBT_M[i_buff_M-5]=='D'))){
-              switch(recBuffBT_M[i_buff_M-5]){    //pid参数传递,"P10.00"
+            if((i_buff_M>=6)&&((recBuffBT_M[i_buff_M-6]=='P')||(recBuffBT_M[i_buff_M-6]=='I')||(recBuffBT_M[i_buff_M-6]=='D'))){
+              switch(recBuffBT_M[i_buff_M-6]){    //pid参数传递,"P100.00"
                 case 'P':
-                  ANG_P_DATA = (float)((recBuffBT_M[i_buff_M-4]-'0')*10.0+(recBuffBT_M[i_buff_M-3]-'0')+(recBuffBT_M[i_buff_M-1]-'0')*0.1+(recBuffBT_M[i_buff_M]-'0')*0.01);
+                  ANG_P_DATA = (float)((recBuffBT_M[i_buff_M-5]-'0')*100.0+(recBuffBT_M[i_buff_M-4]-'0')*10.0+(recBuffBT_M[i_buff_M-3]-'0')+(recBuffBT_M[i_buff_M-1]-'0')*0.1+(recBuffBT_M[i_buff_M]-'0')*0.01);
                   break;
                 case 'I':
-                  ANG_I_DATA = (float)((recBuffBT_M[i_buff_M-4]-'0')*10.0+(recBuffBT_M[i_buff_M-3]-'0')+(recBuffBT_M[i_buff_M-1]-'0')*0.1+(recBuffBT_M[i_buff_M]-'0')*0.01);
+                  ANG_I_DATA = (float)((recBuffBT_M[i_buff_M-5]-'0')*100.0+(recBuffBT_M[i_buff_M-4]-'0')*10.0+(recBuffBT_M[i_buff_M-3]-'0')+(recBuffBT_M[i_buff_M-1]-'0')*0.1+(recBuffBT_M[i_buff_M]-'0')*0.01);
                   break;
                 case 'D':
-                  ANG_D_DATA = (float)((recBuffBT_M[i_buff_M-4]-'0')*10.0+(recBuffBT_M[i_buff_M-3]-'0')+(recBuffBT_M[i_buff_M-1]-'0')*0.1+(recBuffBT_M[i_buff_M]-'0')*0.01);
+                  ANG_D_DATA = (float)((recBuffBT_M[i_buff_M-5]-'0')*100.0+(recBuffBT_M[i_buff_M-4]-'0')*10.0+(recBuffBT_M[i_buff_M-3]-'0')+(recBuffBT_M[i_buff_M-1]-'0')*0.1+(recBuffBT_M[i_buff_M]-'0')*0.01);
                   break;
               }
               sendStringBT("Set successful!\r\n");
@@ -442,6 +444,4 @@ void right_counter_encoder(){
 void left_counter_encoder(){  // //左轮计数
     Lcounter++;
 }
-
-
 
