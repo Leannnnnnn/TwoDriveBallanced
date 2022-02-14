@@ -18,6 +18,9 @@ volatile long Lcounter=0; // 左轮脉冲计数  该变量用于存储编码器�
 long  Rcountbuff=0;
 long  Lcountbuff=0;
 
+int direcL=1;   //电机方向标志
+int direcR=1;   //电机方向标志
+
 /*************蓝牙参数配置**********************/
 BluetoothSerial SerialBT;
 #define Master 0    //主从机模式选择 1主机 0从机
@@ -65,11 +68,19 @@ uint16_t control_flag=0;
 
 
 /************PID参数****************/
-float SPD_P_DATA = 40.0f; // 比例常数 Proportional Const
-float SPD_I_DATA = 0.00f;  // 积分常数  Integral Const    --动态响应
-float SPD_D_DATA = 0.00f; // 微分常数 Derivative Const    --预测作用，增大阻尼
+//角度环
+float ANG_P_DATA = 99.99f; // 比例常数 Proportional Const
+float ANG_I_DATA = 99.99f;  // 积分常数  Integral Const    --动态响应
+float ANG_D_DATA = 3.00f; // 微分常数 Derivative Const    --预测作用，增大阻尼
 #define TARGET_SPEED  0
 #define LIMIT         800      //积分限幅
+
+//速度环
+float SPD_P_DATA = 100.00f; // 比例常数 Proportional Const
+float SPD_I_DATA = 5.00f;  // 积分常数  Integral Const    --动态响应
+float SPD_D_DATA = 0.00f; // 微分常数 Derivative Const    --预测作用，增大阻尼
+
+
 /***************************/
 
 typedef struct
@@ -86,9 +97,20 @@ typedef struct
 
 }PIDs;
 
-PIDs pid_ang;
+PIDs pid_ang, pid_spdL, pid_spdR;
 
-void PID_ParamInit(PIDs *pid)
+void PID_ANG_ParamInit(PIDs *pid)
+{
+    pid->LastError = 0.0;               // Error[-1]
+    pid->PrevError = 0.0;               // Error[-2]
+    pid->Proportion = ANG_P_DATA; // 比例常数 Proportional Const
+    pid->Integral = ANG_I_DATA;   // 积分常数  Integral Const
+    pid->Derivative = ANG_D_DATA; // 微分常数 Derivative Const
+    pid->SetPoint = TARGET_SPEED;     // 设定目标Desired Value
+    pid->lastCCR=0;
+}
+
+void PID_SPD_ParamInit(PIDs *pid)
 {
     pid->LastError = 0.0;               // Error[-1]
     pid->PrevError = 0.0;               // Error[-2]
@@ -100,10 +122,9 @@ void PID_ParamInit(PIDs *pid)
 
 }
 
-void PID_Refresh(PIDs *pid){
-    pid->Proportion = SPD_P_DATA; // 比例常数 Proportional Const
-    pid->Integral = SPD_I_DATA;   // 积分常数  Integral Const
-    pid->Derivative = SPD_D_DATA; // 微分常数 Derivative Const
+void PID_SetSpeed(PIDs *pid,int speed)  //设置速度，实际为编码数量（0--20）
+{
+  pid->SetPoint = speed;
 }
 
 
@@ -120,14 +141,14 @@ float SpdPIDCalc(PIDs *pid,float NextPoint)    //速度闭环PID控制设计--�
     iError = (float)pid->SetPoint - NextPoint; //偏差
 
     if((iError<0.1f )&&(iError>-0.1f))           //偏差滤波
-    iError = 0.0f;
+      iError = 0.0f;
 
     pid->SumError+=iError;
     InteError=pid->Integral * iError;
-    if((pid->SumError>LIMIT)||(pid->SumError<-LIMIT))           //积分项限幅，减小超调
-    {    InteError=0;
-        pid->SumError-=iError;
-    }
+    //if((pid->SumError>LIMIT)||(pid->SumError<-LIMIT))           //积分项限幅，减小超调
+    //{    InteError=0;
+    //    pid->SumError-=iError;
+    //}
 
     //send_pidpoint("add 2,1,",(int)pid->SumError);
 
@@ -142,23 +163,20 @@ float SpdPIDCalc(PIDs *pid,float NextPoint)    //速度闭环PID控制设计--�
 }
 
 
-void moto_init(){
+void moto_init(){  //方向测试用，电机初始化
   pinMode(PWMR1,OUTPUT);
   pinMode(PWMR2,OUTPUT);
   pinMode(PWML1,OUTPUT);
   pinMode(PWML2,OUTPUT);
-
   //digitalWrite(PWML1,LOW);
   //digitalWrite(PWML2,HIGH);
   //digitalWrite(PWMR1,HIGH);
   //digitalWrite(PWMR2,LOW);
-
 }
 
 void moto_pwm_init(){
   ledcSetup(8, 1000, 10);  //设置LEDC通道8频率为1000，分辨率为10位，即占空比可选0~1023
   ledcAttachPin(PWMR1, 8); //设置LEDC通道8在IO上输出
-  //ledcWrite(8, 77); //设置输出PWM占空比,90°
   ledcSetup(9, 1000, 10);  
   ledcAttachPin(PWMR2, 9); 
 
@@ -172,20 +190,24 @@ void moto_pwm_init(){
 void moto_pwm_set(uint8_t moto, int pwm){
   if(moto==LEFT){
     if(pwm<0){
+      direcL=-1;
       ledcWrite(10, -pwm); //设置输出PWM占空比
       ledcWrite(11, 0);
     }
     else{
+      direcL=1;
       ledcWrite(11, pwm); //设置输出PWM占空比
       ledcWrite(10, 0);
     }
   }
   else{
     if(pwm<0){
+      direcR=-1;
       ledcWrite(9, -pwm); //设置输出PWM占空比
       ledcWrite(8, 0);
     }
     else{
+      direcR=1;
       ledcWrite(9, 0);
       ledcWrite(8, pwm); //设置输出PWM占空比
     }
@@ -212,9 +234,13 @@ void setup() {
 
   moto_pwm_init();
   //moto_init();
-  PID_ParamInit(&pid_ang);
+  PID_ANG_ParamInit(&pid_ang);
+  PID_SPD_ParamInit(&pid_spdL);
+  PID_SPD_ParamInit(&pid_spdR);
   moto_pwm_set(RIGHT,0);
   moto_pwm_set(LEFT,0);
+  PID_SetSpeed(&pid_spdL,8);
+  PID_SetSpeed(&pid_spdR,8);
 
   /***************** 编码器初始化 *****************/
   pinMode(RCODE, INPUT);    pinMode(LCODE, INPUT);   
@@ -228,11 +254,15 @@ void setup() {
 
 float getAngle=0.0;
 float setSpeed=0.0;
+float setSpeedL=0.0;
+float setSpeedR=0.0;
+int tnow=0;
+
 
 /********************     LOOP   *****************/
 void loop() {
 
-  if (Serial.available()) { //蓝牙接收，每次收一个数据
+  if (Serial.available()) { //串口接收控制
     switch(Serial.read()){
       case 'S': control_flag=STOP;break;
       case 'F': control_flag=FORWARD;break;
@@ -248,27 +278,37 @@ void loop() {
       moto_pwm_set(LEFT,0);
       break;
     case FORWARD:
-      moto_pwm_set(RIGHT,200);
-      moto_pwm_set(LEFT,200);
+      moto_pwm_set(RIGHT,400);
+      moto_pwm_set(LEFT,400);
       break;
     case BACK:
-      moto_pwm_set(RIGHT,-200);
-      moto_pwm_set(LEFT,-200);
+      moto_pwm_set(RIGHT,-400);
+      moto_pwm_set(LEFT,-400);
       break;
     case BALLANCE:
       if(timer_flag==1){
+        timer_flag=0;
+        /*
+        Serial.print("\r\n");
+        Serial.print("R:");
+        Serial.println(Rcountbuff);
+        Serial.print("\r\n");
+        Serial.print("L:");
+        Serial.println(Lcountbuff);
+        */
         mpu6050.update();
         getAngle=mpu6050.getAngleX();
-        setSpeed+=SpdPIDCalc(&pid_ang,getAngle);
-        moto_pwm_set(RIGHT,(int)setSpeed);
-        moto_pwm_set(LEFT,(int)setSpeed);
-        
-        timer_flag=0;
-        //Serial.println(Rcountbuff);
+        //setSpeed=SpdPIDCalc(&pid_spdL,getAngle);
+        setSpeedL += SpdPIDCalc(&pid_spdL, (direcL*Lcountbuff));
+        //Serial.println(direcL*Lcountbuff);
+        Serial.println(direcR*Rcountbuff);
+        setSpeedR=setSpeed + SpdPIDCalc(&pid_spdR, (direcR*Rcountbuff));
+        moto_pwm_set(RIGHT,(int)(setSpeed+setSpeedR));
+        moto_pwm_set(LEFT,(int)(setSpeed+setSpeedL));
       }
       break;
     case CHANGE:
-      PID_ParamInit(&pid_ang);
+      PID_ANG_ParamInit(&pid_ang);
       setSpeed=0.0;
       sendStringBT("\r\n");
       SerialBT.write('P');
@@ -318,13 +358,13 @@ void Bluetooth_Event(esp_spp_cb_event_t event, esp_spp_cb_param_t *param)  //蓝
             if((i_buff_M>=5)&&((recBuffBT_M[i_buff_M-5]=='P')||(recBuffBT_M[i_buff_M-5]=='I')||(recBuffBT_M[i_buff_M-5]=='D'))){
               switch(recBuffBT_M[i_buff_M-5]){    //pid参数传递,"P10.00"
                 case 'P':
-                  SPD_P_DATA = (float)((recBuffBT_M[i_buff_M-4]-'0')*10.0+(recBuffBT_M[i_buff_M-3]-'0')+(recBuffBT_M[i_buff_M-1]-'0')*0.1+(recBuffBT_M[i_buff_M]-'0')*0.01);
+                  ANG_P_DATA = (float)((recBuffBT_M[i_buff_M-4]-'0')*10.0+(recBuffBT_M[i_buff_M-3]-'0')+(recBuffBT_M[i_buff_M-1]-'0')*0.1+(recBuffBT_M[i_buff_M]-'0')*0.01);
                   break;
                 case 'I':
-                  SPD_I_DATA = (float)((recBuffBT_M[i_buff_M-4]-'0')*10.0+(recBuffBT_M[i_buff_M-3]-'0')+(recBuffBT_M[i_buff_M-1]-'0')*0.1+(recBuffBT_M[i_buff_M]-'0')*0.01);
+                  ANG_I_DATA = (float)((recBuffBT_M[i_buff_M-4]-'0')*10.0+(recBuffBT_M[i_buff_M-3]-'0')+(recBuffBT_M[i_buff_M-1]-'0')*0.1+(recBuffBT_M[i_buff_M]-'0')*0.01);
                   break;
                 case 'D':
-                  SPD_D_DATA = (float)((recBuffBT_M[i_buff_M-4]-'0')*10.0+(recBuffBT_M[i_buff_M-3]-'0')+(recBuffBT_M[i_buff_M-1]-'0')*0.1+(recBuffBT_M[i_buff_M]-'0')*0.01);
+                  ANG_D_DATA = (float)((recBuffBT_M[i_buff_M-4]-'0')*10.0+(recBuffBT_M[i_buff_M-3]-'0')+(recBuffBT_M[i_buff_M-1]-'0')*0.1+(recBuffBT_M[i_buff_M]-'0')*0.01);
                   break;
               }
               sendStringBT("Set successful!\r\n");
@@ -394,7 +434,6 @@ void readEncoder(){
   Lcounter = 0;
 }
 
- 
 
 // 编码器计数，中断回调函数
 void right_counter_encoder(){
