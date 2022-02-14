@@ -65,11 +65,11 @@ uint16_t control_flag=0;
 
 
 /************PID参数****************/
-float SPD_P_DATA = 15.0f; // 比例常数 Proportional Const
-float SPD_I_DATA = 2.00f;  // 积分常数  Integral Const    --动态响应
-float SPD_D_DATA = 5.00f; // 微分常数 Derivative Const    --预测作用，增大阻尼
+float SPD_P_DATA = 40.0f; // 比例常数 Proportional Const
+float SPD_I_DATA = 0.00f;  // 积分常数  Integral Const    --动态响应
+float SPD_D_DATA = 0.00f; // 微分常数 Derivative Const    --预测作用，增大阻尼
 #define TARGET_SPEED  0
-#define LIMIT         200      //积分限幅
+#define LIMIT         800      //积分限幅
 /***************************/
 
 typedef struct
@@ -256,24 +256,33 @@ void loop() {
       moto_pwm_set(LEFT,-200);
       break;
     case BALLANCE:
-      mpu6050.update();
-      getAngle=mpu6050.getAngleX();
-      setSpeed+=SpdPIDCalc(&pid_ang,getAngle);
-      moto_pwm_set(RIGHT,(int)setSpeed);
-      moto_pwm_set(LEFT,(int)setSpeed);
       if(timer_flag==1){
+        mpu6050.update();
+        getAngle=mpu6050.getAngleX();
+        setSpeed+=SpdPIDCalc(&pid_ang,getAngle);
+        moto_pwm_set(RIGHT,(int)setSpeed);
+        moto_pwm_set(LEFT,(int)setSpeed);
+        
         timer_flag=0;
         //Serial.println(Rcountbuff);
       }
       break;
     case CHANGE:
       PID_ParamInit(&pid_ang);
-      control_flag=BALLANCE;
+      setSpeed=0.0;
+      sendStringBT("\r\n");
+      SerialBT.write('P');
       sendFloatBT(pid_ang.Proportion);
-      sendFloatBT(pid_ang.Integral);
-      sendFloatBT(pid_ang.Derivative);
-      sendFloatBT(pid_ang.SetPoint);
+      sendStringBT("\r\n");
 
+      SerialBT.write('I');
+      sendFloatBT(pid_ang.Integral);
+      sendStringBT("\r\n");
+
+      SerialBT.write('D');
+      sendFloatBT(pid_ang.Derivative);
+      sendStringBT("\r\n");
+      control_flag=STOP;
       break;
     default: break;
   }
@@ -307,7 +316,7 @@ void Bluetooth_Event(esp_spp_cb_event_t event, esp_spp_cb_param_t *param)  //蓝
                 }
 
             if((i_buff_M>=5)&&((recBuffBT_M[i_buff_M-5]=='P')||(recBuffBT_M[i_buff_M-5]=='I')||(recBuffBT_M[i_buff_M-5]=='D'))){
-              switch(recBuffBT_M[i_buff_M-5]){    //pid参数传递
+              switch(recBuffBT_M[i_buff_M-5]){    //pid参数传递,"P10.00"
                 case 'P':
                   SPD_P_DATA = (float)((recBuffBT_M[i_buff_M-4]-'0')*10.0+(recBuffBT_M[i_buff_M-3]-'0')+(recBuffBT_M[i_buff_M-1]-'0')*0.1+(recBuffBT_M[i_buff_M]-'0')*0.01);
                   break;
@@ -320,6 +329,8 @@ void Bluetooth_Event(esp_spp_cb_event_t event, esp_spp_cb_param_t *param)  //蓝
               }
               sendStringBT("Set successful!\r\n");
               sendStringBT(recBuffBT_M);
+              sendStringBT("\r\n");
+
               i_buff_M=0;
               control_flag=CHANGE;
           }
