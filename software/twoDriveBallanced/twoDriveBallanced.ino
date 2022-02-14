@@ -20,7 +20,7 @@ long  Lcountbuff=0;
 
 /*************蓝牙参数配置**********************/
 BluetoothSerial SerialBT;
-#define Master 1    //主从机模式选择 1主机 0从机
+#define Master 0    //主从机模式选择 1主机 0从机
 void Bluetooth_Event(esp_spp_cb_event_t event, esp_spp_cb_param_t *param);  //蓝牙事件回调函数
 void sendFloatBT(float data);   //蓝牙发送浮点数
 void sendStringBT(char* sdata);  //蓝牙发送字符串
@@ -35,12 +35,12 @@ char receive_A1[20];
 uint16_t control_flag=0;
 
 /************电机参数宏**************/
-#define PWML1 35
-#define PWML2 34
+#define PWML1 13
+#define PWML2 14
 #define PWMR1 33
 #define PWMR2 32
-#define MOTOR 26
-#define MOTOL 25
+#define RCODE 26
+#define LCODE 25
 /**********************************/
 
 /***********控制信息宏定义*************/
@@ -53,6 +53,7 @@ uint16_t control_flag=0;
 #define FORWARD     0x06
 #define BACK        0x07
 #define BALLANCE    0x08
+#define CHANGE      0x09
 #define NEXTSTAT    0xff 
 /**********************************/
 
@@ -64,19 +65,19 @@ uint16_t control_flag=0;
 
 
 /************PID参数****************/
-#define SPD_P_DATA    50.0f // 比例常数 Proportional Const
-#define SPD_I_DATA    0.00f  // 积分常数  Integral Const    --动态响应
-#define SPD_D_DATA    0.00f // 微分常数 Derivative Const    --预测作用，增大阻尼
+float SPD_P_DATA = 15.0f; // 比例常数 Proportional Const
+float SPD_I_DATA = 2.00f;  // 积分常数  Integral Const    --动态响应
+float SPD_D_DATA = 5.00f; // 微分常数 Derivative Const    --预测作用，增大阻尼
 #define TARGET_SPEED  0
 #define LIMIT         200      //积分限幅
 /***************************/
 
 typedef struct
 {
-    double SumError; //误差累计
-    double Proportion; //比例常数Proportional Const
-    double Integral; //积分常数 IntegralConst
-    double Derivative; //微分常数Derivative Const
+    float SumError; //误差累计
+    float Proportion; //比例常数Proportional Const
+    float Integral; //积分常数 IntegralConst
+    float Derivative; //微分常数Derivative Const
     float SetPoint; //设定目标 DesiredValue
     float LastError; //Error[-1]
     float PrevError; //Error[-2]
@@ -97,6 +98,12 @@ void PID_ParamInit(PIDs *pid)
     pid->SetPoint = TARGET_SPEED;     // 设定目标Desired Value
     pid->lastCCR=0;
 
+}
+
+void PID_Refresh(PIDs *pid){
+    pid->Proportion = SPD_P_DATA; // 比例常数 Proportional Const
+    pid->Integral = SPD_I_DATA;   // 积分常数  Integral Const
+    pid->Derivative = SPD_D_DATA; // 微分常数 Derivative Const
 }
 
 
@@ -138,73 +145,83 @@ float SpdPIDCalc(PIDs *pid,float NextPoint)    //速度闭环PID控制设计--�
 void moto_init(){
   pinMode(PWMR1,OUTPUT);
   pinMode(PWMR2,OUTPUT);
+  pinMode(PWML1,OUTPUT);
+  pinMode(PWML2,OUTPUT);
+
+  //digitalWrite(PWML1,LOW);
+  //digitalWrite(PWML2,HIGH);
+  //digitalWrite(PWMR1,HIGH);
+  //digitalWrite(PWMR2,LOW);
+
 }
 
 void moto_pwm_init(){
   ledcSetup(8, 1000, 10);  //设置LEDC通道8频率为1000，分辨率为10位，即占空比可选0~1023
   ledcAttachPin(PWMR1, 8); //设置LEDC通道8在IO上输出
   //ledcWrite(8, 77); //设置输出PWM占空比,90°
-  ledcSetup(7, 1000, 10);  
-  ledcAttachPin(PWMR2, 7); 
+  ledcSetup(9, 1000, 10);  
+  ledcAttachPin(PWMR2, 9); 
 
-  ledcSetup(6, 1000, 10);  
-  ledcAttachPin(PWML1, 6); 
-  ledcSetup(5, 1000, 10);  
-  ledcAttachPin(PWML2, 5); 
+  ledcSetup(10, 1000, 10);  
+  ledcAttachPin(PWML1, 10); 
+  ledcSetup(11, 1000, 10);  
+  ledcAttachPin(PWML2, 11); 
 
 }
 
 void moto_pwm_set(uint8_t moto, int pwm){
   if(moto==LEFT){
     if(pwm<0){
-      ledcWrite(5, -pwm); //设置输出PWM占空比
-      ledcWrite(6, 0);
+      ledcWrite(10, -pwm); //设置输出PWM占空比
+      ledcWrite(11, 0);
     }
     else{
-      ledcWrite(6, pwm); //设置输出PWM占空比
-      ledcWrite(5, 0);
+      ledcWrite(11, pwm); //设置输出PWM占空比
+      ledcWrite(10, 0);
     }
   }
   else{
     if(pwm<0){
-      ledcWrite(7, -pwm); //设置输出PWM占空比
+      ledcWrite(9, -pwm); //设置输出PWM占空比
       ledcWrite(8, 0);
     }
     else{
-      ledcWrite(7, 0);
+      ledcWrite(9, 0);
       ledcWrite(8, pwm); //设置输出PWM占空比
     }
   }
 }
 
 
+void right_counter_encoder();
+void left_counter_encoder();
+void readEncoder();
+void timerIsr();
+
 
 void setup() {
   Serial.begin(115200);
-  moto_pwm_init();
+  SerialBT.register_callback(Bluetooth_Event); //设置事件回调函数 连接 断开 发送 接收
+  SerialBT.begin("Leansbot"); //Bluetooth device name    
+  Serial.println("The device started, now you can pair it with bluetooth!");
+
   //mpu6050
-  Wire.begin(13,14 ,400000);// (sda,scl)Set I2C frequency to 400kHz
+  Wire.begin(18,19 ,400000);// (sda,scl)Set I2C frequency to 400kHz
   mpu6050.begin();
   mpu6050.calcGyroOffsets(true);
-  
-  /*
-  //bluetooth initiate
-  SerialBT.register_callback(Bluetooth_Event); //设置事件回调函数 连接 断开 发送 接收
-  SerialBT.begin("ESP32_MASTER",true); //开启蓝牙 名称为:"ESP32_MASTER" 主机
-  Serial.printf("Init Successful - Master\r\n");
-  SerialBT.connect(address);
-  Serial.printf("Connect Successful\r\n");
-  */
 
+  moto_pwm_init();
+  //moto_init();
   PID_ParamInit(&pid_ang);
   moto_pwm_set(RIGHT,0);
+  moto_pwm_set(LEFT,0);
 
-/***************** 编码器初始化 *****************/
-  pinMode(MOTOR, INPUT);    pinMode(MOTOL, INPUT);   
-  attachInterrupt(MOTOR, right_counter_encoder, RISING);//设置编码器R上升沿中断
-  attachInterrupt(MOTOL, left_counter_encoder, RISING);//设置编码器L上升沿中断      
+  /***************** 编码器初始化 *****************/
+  pinMode(RCODE, INPUT);    pinMode(LCODE, INPUT);   
+  attachInterrupt(RCODE, right_counter_encoder, RISING);//设置编码器R上升沿中断
+  attachInterrupt(LCODE, left_counter_encoder, RISING);//设置编码器L上升沿中断      
     
-/***************** 定时中断 *****************/   
+  /***************** 定时中断 *****************/   
   timer1.attach_ms(interrupt_time, timerIsr);  // 打开定时器中断
   interrupts();                      //打开外部中断  
 }
@@ -215,11 +232,7 @@ float setSpeed=0.0;
 /********************     LOOP   *****************/
 void loop() {
 
-  if (SerialBT.available()) { //蓝牙接收，每次收一个数据
-    btReceive(SerialBT.read());
-  }
-
-  if(Serial.available()){
+  if (Serial.available()) { //蓝牙接收，每次收一个数据
     switch(Serial.read()){
       case 'S': control_flag=STOP;break;
       case 'F': control_flag=FORWARD;break;
@@ -228,42 +241,46 @@ void loop() {
       default:break;
     }
   }
+  
   switch(control_flag){
     case STOP:
       moto_pwm_set(RIGHT,0);
+      moto_pwm_set(LEFT,0);
       break;
     case FORWARD:
       moto_pwm_set(RIGHT,200);
+      moto_pwm_set(LEFT,200);
       break;
     case BACK:
       moto_pwm_set(RIGHT,-200);
+      moto_pwm_set(LEFT,-200);
       break;
     case BALLANCE:
       mpu6050.update();
-      getAngle=mpu6050.getAngleY();
+      getAngle=mpu6050.getAngleX();
       setSpeed+=SpdPIDCalc(&pid_ang,getAngle);
-      //moto_pwm_set(MOTOR,(int)setSpeed);
+      moto_pwm_set(RIGHT,(int)setSpeed);
+      moto_pwm_set(LEFT,(int)setSpeed);
       if(timer_flag==1){
         timer_flag=0;
-        Serial.println(Rcountbuff);
+        //Serial.println(Rcountbuff);
       }
+      break;
+    case CHANGE:
+      PID_ParamInit(&pid_ang);
+      control_flag=BALLANCE;
+      sendFloatBT(pid_ang.Proportion);
+      sendFloatBT(pid_ang.Integral);
+      sendFloatBT(pid_ang.Derivative);
+      sendFloatBT(pid_ang.SetPoint);
+
       break;
     default: break;
   }
-
-
-  // open loop velocity movement
-  // using motor.voltage_limit and motor.velocity_limit
-  //motor.move(target_velocity);
-  //mpu6050.update();
-  //getAngle=mpu6050.getAngleX();
-  //sendFloatBT(getAngle);
-  //setSpeed+=SpdPIDCalc(&pid_ang,getAngle);  //增量式pid
-
 }
 
 
-/*******************    LOOP   ******************/
+/*******************    蓝牙事件回调函数   ******************/
 
 void Bluetooth_Event(esp_spp_cb_event_t event, esp_spp_cb_param_t *param)  //蓝牙事件回调函数
 {
@@ -280,21 +297,31 @@ void Bluetooth_Event(esp_spp_cb_event_t event, esp_spp_cb_param_t *param)  //蓝
         while(SerialBT.available())
         {
             recBuffBT_M[i_buff_M]=SerialBT.read();
-            if((i_buff_M>=4)&&((recBuffBT_M[i_buff_M-4]=='P')||(recBuffBT_M[i_buff_M-4]=='I')||(recBuffBT_M[i_buff_M-4]=='D'))){
-              switch(recBuffBT_M[i_buff_M-4]){    //pid参数传递
+
+            switch(recBuffBT_M[i_buff_M]){
+                  case 'S': control_flag=STOP;break;
+                  case 'F': control_flag=FORWARD;break;
+                  case 'B': control_flag=BACK;break;
+                  case 'M': control_flag=BALLANCE;break;
+                  default:break;
+                }
+
+            if((i_buff_M>=5)&&((recBuffBT_M[i_buff_M-5]=='P')||(recBuffBT_M[i_buff_M-5]=='I')||(recBuffBT_M[i_buff_M-5]=='D'))){
+              switch(recBuffBT_M[i_buff_M-5]){    //pid参数传递
                 case 'P':
-                  pid_ang.Proportion = (float)((recBuffBT_M[i_buff_M-3]-'0')+(recBuffBT_M[i_buff_M-1]-'0')*0.1+(recBuffBT_M[i_buff_M]-'0')*0.01);
+                  SPD_P_DATA = (float)((recBuffBT_M[i_buff_M-4]-'0')*10.0+(recBuffBT_M[i_buff_M-3]-'0')+(recBuffBT_M[i_buff_M-1]-'0')*0.1+(recBuffBT_M[i_buff_M]-'0')*0.01);
                   break;
                 case 'I':
-                  pid_ang.Integral = (float)((recBuffBT_M[i_buff_M-3]-'0')+(recBuffBT_M[i_buff_M-1]-'0')*0.1+(recBuffBT_M[i_buff_M]-'0')*0.01);
+                  SPD_I_DATA = (float)((recBuffBT_M[i_buff_M-4]-'0')*10.0+(recBuffBT_M[i_buff_M-3]-'0')+(recBuffBT_M[i_buff_M-1]-'0')*0.1+(recBuffBT_M[i_buff_M]-'0')*0.01);
                   break;
                 case 'D':
-                  pid_ang.Derivative = (float)((recBuffBT_M[i_buff_M-3]-'0')+(recBuffBT_M[i_buff_M-1]-'0')*0.1+(recBuffBT_M[i_buff_M]-'0')*0.01);
+                  SPD_D_DATA = (float)((recBuffBT_M[i_buff_M-4]-'0')*10.0+(recBuffBT_M[i_buff_M-3]-'0')+(recBuffBT_M[i_buff_M-1]-'0')*0.1+(recBuffBT_M[i_buff_M]-'0')*0.01);
                   break;
               }
               sendStringBT("Set successful!\r\n");
               sendStringBT(recBuffBT_M);
-                i_buff_M=0;
+              i_buff_M=0;
+              control_flag=CHANGE;
           }
           else ++i_buff_M;
         }
@@ -325,10 +352,9 @@ void btReceive(int rec){  //蓝牙接收信息处理
     receive_A1[i_rec]=rec;
     if((i_rec>5)&&(receive_A1[i_rec-6]==0x55)&&(receive_A1[i_rec]==0xff)&&(receive_A1[i_rec-1]==0xff)){
       switch(receive_A1[i_rec-5]){
-        case 0x00:          //选择舵机序号
+        case 0x00:          
             //servo_num=receive_A1[i_rec-4];  
             //digitalWrite(2,HIGH);
-            //Serial.write(servo_num);
             i_rec=0;
             break;
         case 0x01:          //角度控制开关
