@@ -69,17 +69,17 @@ uint16_t control_flag=0;
 
 /************PID参数****************/
 //角度环
-float ANG_P_DATA = 999.99f; // 比例常数 Proportional Const
-float ANG_I_DATA = 70.00f;  // 积分常数  Integral Const    --动态响应
-float ANG_D_DATA = 10.00f; // 微分常数 Derivative Const    --预测作用，增大阻尼
-#define TARGET_SPEED  0
-#define LIMIT         800      //积分限幅
+float ANG_P_DATA = 500.00f; // 比例常数 Proportional Const
+float ANG_I_DATA = 5.00f;  // 积分常数  Integral Const    --动态响应
+float ANG_D_DATA = 0.00f; // 微分常数 Derivative Const    --预测作用，增大阻尼
+#define TARGET_ANGLE  -1.50   //需测试角度机械零点
+#define LIMIT         1000      //积分限幅
 
 //速度环
 float SPD_P_DATA = 20.00f; // 比例常数 Proportional Const
 float SPD_I_DATA = 2.00f;  // 积分常数  Integral Const    --动态响应
 float SPD_D_DATA = 0.00f; // 微分常数 Derivative Const    --预测作用，增大阻尼
-
+#define TARGET_SPEED  0   //设定目标点初值
 
 /***************************/
 
@@ -106,7 +106,7 @@ void PID_ANG_ParamInit(PIDs *pid)
     pid->Proportion = ANG_P_DATA; // 比例常数 Proportional Const
     pid->Integral = ANG_I_DATA;   // 积分常数  Integral Const
     pid->Derivative = ANG_D_DATA; // 微分常数 Derivative Const
-    pid->SetPoint = TARGET_SPEED;     // 设定目标Desired Value
+    pid->SetPoint = TARGET_ANGLE;     // 设定目标Desired Value
     pid->lastCCR=0;
 }
 
@@ -147,10 +147,10 @@ float SpdPIDCalc(PIDs *pid,float NextPoint)    //速度闭环PID控制设计--�
 
     pid->SumError+=iError;
     InteError=pid->Integral * iError;
-    //if((pid->SumError>LIMIT)||(pid->SumError<-LIMIT))           //积分项限幅，减小超调
-    //{    InteError=0;
-    //    pid->SumError-=iError;
-    //}
+    if((pid->SumError>LIMIT)||(pid->SumError<-LIMIT))           //积分项限幅，减小超调
+    {    InteError=0;
+         pid->SumError-=iError;
+    }
 
     //send_pidpoint("add 2,1,",(int)pid->SumError);
 
@@ -280,8 +280,8 @@ void loop() {
       moto_pwm_set(LEFT,0);
       break;
     case FORWARD:
-      moto_pwm_set(RIGHT,400);
-      moto_pwm_set(LEFT,400);
+      moto_pwm_set(RIGHT,1000);
+      moto_pwm_set(LEFT,1000);
       break;
     case BACK:
       moto_pwm_set(RIGHT,-400);
@@ -300,13 +300,17 @@ void loop() {
         */
         mpu6050.update();
         getAngle=mpu6050.getAngleX();
-        setSpeed=SpdPIDCalc(&pid_ang,getAngle);
-        setSpeedL += SpdPIDCalc(&pid_spdL, (direcL*Lcountbuff));
+        
+        
+        //setSpeedL = SpdPIDCalc(&pid_spdL, (direcL*Lcountbuff)+(direcR*Rcountbuff));
+        //pid_ang.SetPoint=SpdPIDCalc(&pid_spdL, (direcL*Lcountbuff)+(direcR*Rcountbuff));
         //Serial.println(direcL*Lcountbuff);
         //Serial.println(direcR*Rcountbuff);
-        setSpeedR += SpdPIDCalc(&pid_spdR, (direcR*Rcountbuff));
-        moto_pwm_set(RIGHT,(int)(setSpeed+setSpeedR));
-        moto_pwm_set(LEFT,(int)(setSpeed+setSpeedL));
+        //setSpeedR += SpdPIDCalc(&pid_spdR, (direcR*Rcountbuff));
+        setSpeed+=SpdPIDCalc(&pid_ang,getAngle);
+        moto_pwm_set(RIGHT,(int)(setSpeed));
+        moto_pwm_set(LEFT,(int)(setSpeed));
+
       }
       break;
     case CHANGE:
@@ -357,16 +361,16 @@ void Bluetooth_Event(esp_spp_cb_event_t event, esp_spp_cb_param_t *param)  //蓝
                   default:break;
                 }
 
-            if((i_buff_M>=6)&&((recBuffBT_M[i_buff_M-6]=='P')||(recBuffBT_M[i_buff_M-6]=='I')||(recBuffBT_M[i_buff_M-6]=='D'))){
-              switch(recBuffBT_M[i_buff_M-6]){    //pid参数传递,"P100.00"
+            if((i_buff_M>=7)&&((recBuffBT_M[i_buff_M-7]=='P')||(recBuffBT_M[i_buff_M-7]=='I')||(recBuffBT_M[i_buff_M-7]=='D'))){
+              switch(recBuffBT_M[i_buff_M-7]){    //pid参数传递,"P1000.00"
                 case 'P':
-                  ANG_P_DATA = (float)((recBuffBT_M[i_buff_M-5]-'0')*100.0+(recBuffBT_M[i_buff_M-4]-'0')*10.0+(recBuffBT_M[i_buff_M-3]-'0')+(recBuffBT_M[i_buff_M-1]-'0')*0.1+(recBuffBT_M[i_buff_M]-'0')*0.01);
+                  ANG_P_DATA = (float)((recBuffBT_M[i_buff_M-6]-'0')*1000.0+(recBuffBT_M[i_buff_M-5]-'0')*100.0+(recBuffBT_M[i_buff_M-4]-'0')*10.0+(recBuffBT_M[i_buff_M-3]-'0')+(recBuffBT_M[i_buff_M-1]-'0')*0.1+(recBuffBT_M[i_buff_M]-'0')*0.01);
                   break;
                 case 'I':
-                  ANG_I_DATA = (float)((recBuffBT_M[i_buff_M-5]-'0')*100.0+(recBuffBT_M[i_buff_M-4]-'0')*10.0+(recBuffBT_M[i_buff_M-3]-'0')+(recBuffBT_M[i_buff_M-1]-'0')*0.1+(recBuffBT_M[i_buff_M]-'0')*0.01);
+                  ANG_I_DATA = (float)((recBuffBT_M[i_buff_M-6]-'0')*1000.0+(recBuffBT_M[i_buff_M-5]-'0')*100.0+(recBuffBT_M[i_buff_M-4]-'0')*10.0+(recBuffBT_M[i_buff_M-3]-'0')+(recBuffBT_M[i_buff_M-1]-'0')*0.1+(recBuffBT_M[i_buff_M]-'0')*0.01);
                   break;
                 case 'D':
-                  ANG_D_DATA = (float)((recBuffBT_M[i_buff_M-5]-'0')*100.0+(recBuffBT_M[i_buff_M-4]-'0')*10.0+(recBuffBT_M[i_buff_M-3]-'0')+(recBuffBT_M[i_buff_M-1]-'0')*0.1+(recBuffBT_M[i_buff_M]-'0')*0.01);
+                  ANG_D_DATA = (float)((recBuffBT_M[i_buff_M-6]-'0')*1000.0+(recBuffBT_M[i_buff_M-5]-'0')*100.0+(recBuffBT_M[i_buff_M-4]-'0')*10.0+(recBuffBT_M[i_buff_M-3]-'0')+(recBuffBT_M[i_buff_M-1]-'0')*0.1+(recBuffBT_M[i_buff_M]-'0')*0.01);
                   break;
               }
               sendStringBT("Set successful!\r\n");
